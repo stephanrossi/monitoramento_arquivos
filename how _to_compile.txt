@@ -1,0 +1,1 @@
+pyinstaller --onefile --noconsole --icon="seu_icone.ico" --add-data "seu_icone.ico;." monitoramento.py
