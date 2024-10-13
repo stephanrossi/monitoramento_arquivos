@@ -14,10 +14,6 @@ import pystray
 from PIL import Image, ImageDraw
 import tkinter as tk
 from tkinter import filedialog
-import logging
-
-# Configurar o logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Variáveis globais
 MONITORED_DIR = None
@@ -25,7 +21,6 @@ REPORT_NAME = None
 event_list = []
 observer = None
 icon = None
-event_list_lock = threading.Lock()
 
 # Função para obter o nome do usuário que modificou o arquivo
 def get_file_owner(filepath):
@@ -45,7 +40,7 @@ class MyHandler(FileSystemEventHandler):
                 file_size_kb = file_size_bytes / 1024  # Convertendo para KB
                 file_size_kb = round(file_size_kb, 2)  # Arredondando para duas casas decimais
                 file_owner = get_file_owner(filepath)
-                timestamp = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 event_info = {
                     'Data/Hora': timestamp,
                     'Usuário': file_owner,
@@ -54,11 +49,9 @@ class MyHandler(FileSystemEventHandler):
                     'Caminho': filepath,
                     'Tamanho (KB)': file_size_kb
                 }
-                with event_list_lock:
-                    event_list.append(event_info)
-                logging.info(f"Arquivo criado: {filename}")
+                event_list.append(event_info)
             except Exception as e:
-                logging.error(f"Erro ao processar o arquivo {event.src_path}: {e}")
+                print(f"Erro ao processar o arquivo {event.src_path}: {e}")
 
     def on_modified(self, event):
         if not event.is_directory:
@@ -69,7 +62,7 @@ class MyHandler(FileSystemEventHandler):
                 file_size_kb = file_size_bytes / 1024  # Convertendo para KB
                 file_size_kb = round(file_size_kb, 2)  # Arredondando para duas casas decimais
                 file_owner = get_file_owner(filepath)
-                timestamp = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 event_info = {
                     'Data/Hora': timestamp,
                     'Usuário': file_owner,
@@ -78,11 +71,9 @@ class MyHandler(FileSystemEventHandler):
                     'Caminho': filepath,
                     'Tamanho (KB)': file_size_kb
                 }
-                with event_list_lock:
-                    event_list.append(event_info)
-                logging.info(f"Arquivo modificado: {filename}")
+                event_list.append(event_info)
             except Exception as e:
-                logging.error(f"Erro ao processar o arquivo {event.src_path}: {e}")
+                print(f"Erro ao processar o arquivo {event.src_path}: {e}")
 
     def on_deleted(self, event):
         if not event.is_directory:
@@ -90,7 +81,7 @@ class MyHandler(FileSystemEventHandler):
                 filepath = event.src_path
                 filename = os.path.basename(filepath)
                 file_owner = "Desconhecido"
-                timestamp = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 event_info = {
                     'Data/Hora': timestamp,
                     'Usuário': file_owner,
@@ -99,37 +90,32 @@ class MyHandler(FileSystemEventHandler):
                     'Caminho': filepath,
                     'Tamanho (KB)': 'N/A'
                 }
-                with event_list_lock:
-                    event_list.append(event_info)
-                logging.info(f"Arquivo deletado: {filename}")
+                event_list.append(event_info)
             except Exception as e:
-                logging.error(f"Erro ao processar o arquivo {event.src_path}: {e}")
+                print(f"Erro ao processar o arquivo {event.src_path}: {e}")
 
 # Função para gerar o relatório em Excel a cada 5 minutos
 def schedule_report():
     while True:
         time.sleep(300)  # Espera 5 minutos (300 segundos)
-        with event_list_lock:
-            if event_list and REPORT_NAME:
-                events_to_process = event_list.copy()
-                event_list.clear()
+        if event_list and REPORT_NAME:
+            # Verifica se o arquivo Excel já existe
+            if os.path.exists(REPORT_NAME):
+                # Carrega o DataFrame existente
+                existing_df = pd.read_excel(REPORT_NAME)
+                # Cria um DataFrame com os novos eventos
+                new_df = pd.DataFrame(event_list)
+                # Concatena os DataFrames
+                combined_df = pd.concat([existing_df, new_df], ignore_index=True)
             else:
-                events_to_process = []
-
-        if events_to_process:
-            logging.info("Salvando novos eventos no relatório.")
-            try:
-                if os.path.exists(REPORT_NAME):
-                    existing_df = pd.read_excel(REPORT_NAME)
-                    new_df = pd.DataFrame(events_to_process)
-                    combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-                else:
-                    combined_df = pd.DataFrame(events_to_process)
-                combined_df.to_excel(REPORT_NAME, index=False)
-            except Exception as e:
-                logging.error(f"Erro ao salvar o relatório: {e}")
+                # Cria um DataFrame com os novos eventos
+                combined_df = pd.DataFrame(event_list)
+            # Salva o DataFrame combinado no arquivo Excel
+            combined_df.to_excel(REPORT_NAME, index=False)
+            # Limpa a lista após salvar
+            event_list.clear()
         else:
-            logging.info("Nenhum novo evento para salvar.")
+            print("Nenhum novo evento registrado ou local do relatório não definido.")
 
 # Funções para o menu do ícone da bandeja
 def on_exit(icon, item):
@@ -137,21 +123,6 @@ def on_exit(icon, item):
     if observer:
         observer.stop()
         observer.join()
-    # Salva os eventos restantes
-    with event_list_lock:
-        if event_list and REPORT_NAME:
-            logging.info("Salvando eventos restantes antes de sair.")
-            try:
-                if os.path.exists(REPORT_NAME):
-                    existing_df = pd.read_excel(REPORT_NAME)
-                    new_df = pd.DataFrame(event_list)
-                    combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-                else:
-                    combined_df = pd.DataFrame(event_list)
-                combined_df.to_excel(REPORT_NAME, index=False)
-                event_list.clear()
-            except Exception as e:
-                logging.error(f"Erro ao salvar o relatório: {e}")
 
 def select_monitored_dir(icon, item):
     global MONITORED_DIR, observer
@@ -160,15 +131,14 @@ def select_monitored_dir(icon, item):
     new_dir = filedialog.askdirectory(title="Selecione o diretório a ser monitorado")
     if new_dir:
         MONITORED_DIR = new_dir
-        logging.info(f"Diretório monitorado atualizado para: {MONITORED_DIR}")
-        # Reiniciar o observador se já estiver rodando
+        # Reiniciar o observador
         if observer:
             observer.stop()
             observer.join()
-            event_handler = MyHandler()
-            observer = Observer()
-            observer.schedule(event_handler, path=MONITORED_DIR, recursive=True)
-            observer.start()
+        event_handler = MyHandler()
+        observer = Observer()
+        observer.schedule(event_handler, path=MONITORED_DIR, recursive=True)
+        observer.start()
 
 def select_report_location(icon, item):
     global REPORT_NAME
@@ -181,7 +151,6 @@ def select_report_location(icon, item):
     )
     if file_path:
         REPORT_NAME = file_path
-        logging.info(f"Local do relatório definido para: {REPORT_NAME}")
 
 def create_image():
     # Verifica se está sendo executado pelo PyInstaller
@@ -205,11 +174,11 @@ def setup_tray_icon():
 
 def main():
     global observer
-    # Solicita ao usuário o diretório e o local do relatório
+    # Inicialmente, solicitar ao usuário o diretório a ser monitorado e o local para salvar o relatório
     select_monitored_dir(None, None)
     select_report_location(None, None)
     if not MONITORED_DIR or not REPORT_NAME:
-        logging.error("Diretório monitorado ou local do relatório não foi selecionado. Encerrando.")
+        print("Diretório monitorado ou local do relatório não foi selecionado. Encerrando.")
         return
 
     event_handler = MyHandler()
